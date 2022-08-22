@@ -1,0 +1,152 @@
+---
+title: "STA130 R Simple Linear Regression"
+author: "Scott Schwartz"
+date: "Fall 2022 Week 8"
+output:
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(eval=TRUE, include=TRUE, echo=TRUE, message=FALSE, error=FALSE)
+```
+
+# Part 1: Data
+
+```{r, include=FALSE}
+library(tidyverse)
+library(palmerpenguins) # install.packages("palmerpenguins")
+# https://allisonhorst.github.io/palmerpenguins/articles/intro.html
+# https://education.rstudio.com/blog/2020/07/palmerpenguins-cran/
+```
+
+```{r}
+glimpse(penguins) # a first look at the data
+```
+# Part 2: Simple Linear Regression
+
+```{r, fig.width=5, fig.height=2.5}
+# First step let's look at the association between bill depth and bill length
+penguins %>% ggplot(aes(x=bill_depth_mm, y=bill_length_mm)) +
+  geom_point()
+```
+
+```{r, fig.width=5, fig.height=2.5}
+# Let's get rid of the warning
+penguins_clean <- penguins %>% filter(!is.na(bill_depth_mm) & !is.na(bill_length_mm))
+
+# Now we can fit a linear regression model to start exploring this association more deeply
+penguins_clean %>% ggplot(aes(x=bill_depth_mm, y=bill_length_mm)) +
+  geom_point() +
+  geom_smooth(method="lm", se=FALSE)
+```
+
+```{r}
+model1 <- lm(bill_length_mm ~ bill_depth_mm, data=penguins_clean)
+summary(model1)$coefficients
+```
+
+# Part 3: Multivariate Linear Regression
+
+Do you think the fitted linear model above effectively represents the association between bill depth and bill length? What other variable could we add to this model? 
+
+```{r, fig.width=5, fig.height=2.5}
+# First step let's look at the association between bill depth and bill length
+penguins %>% ggplot(aes(x=bill_depth_mm, y=bill_length_mm, color=species)) +
+  geom_point()
+```
+
+
+```{r}
+# New variable to add to the model: species
+model2 <- lm(bill_length_mm ~ bill_depth_mm + species, data=penguins_clean)
+summary(model2)$coefficients
+# Here Adelie is the baseline because it doesn't appear in the summary table
+# M levels are represented by M-1 indicator variables
+# xi2 = I(penguin i is Chinstrap); xi3 = I(penguin i is Gentoo)
+# So Chinstrap is x2=1 and x3=0; Gentoo is x2=0 and x3=1; Adelies is x2=x3=0
+```
+
+```{r, fig.width=5, fig.height=2.5}
+library(broom)
+penguins_clean %>% ggplot(aes(x=bill_depth_mm, y=bill_length_mm, color=species)) +
+  geom_point() +
+  geom_line(data=augment(model2), aes(y=.fitted))
+```
+
+# Part 4: Interaction Terms
+
+```{r}
+# What about an interaction term?
+model3 <- lm(bill_length_mm ~ bill_depth_mm * species, data=penguins_clean)
+summary(model3)$coefficients
+```
+
+```{r, fig.width=5, fig.height=2.5}
+penguins_clean %>% ggplot(aes(x=bill_depth_mm, y=bill_length_mm, color=species)) +
+  geom_point() +
+  geom_smooth(method="lm", se=FALSE)
+```
+
+```{r}
+# To make a prediction about the bill length of a Chinstrap penguin with bill depth of 17mm
+predict(model3, newdata = tibble(bill_depth_mm=17, species="Chinstrap"))
+```
+
+# Part 5: Comparing the prediction accuracy of multiple models
+
+```{r}
+# Set up
+set.seed(17); 
+n <- nrow(penguins_clean)
+training_indices <- sample(1:n, size=round(0.8*n))
+
+penguins_clean <- penguins_clean %>% rowid_to_column() # adds a new ID column
+
+# Create training dataset
+train <- penguins_clean %>% filter(rowid %in% training_indices)
+y_train <- train$bill_length_mm;
+
+# Testing dataset includes all observations NOT in the training data
+test <- penguins_clean %>% filter(!rowid %in% training_indices)
+y_test <- test$bill_length_mm;
+
+# Fit models to training data
+modA_train <- lm(bill_length_mm ~ bill_depth_mm,           data = train)
+modB_train <- lm(bill_length_mm ~ bill_depth_mm + species, data = train)
+modC_train <- lm(bill_length_mm ~ bill_depth_mm * species, data = train)
+
+
+# Make predictions for testing data using training model
+yhat_modA_test <- predict(modA_train, newdata = test)
+yhat_modB_test <- predict(modB_train, newdata = test)
+yhat_modC_test <- predict(modC_train, newdata = test)
+
+
+# Make predictions for training data using training model
+yhat_modA_train <- predict(modA_train, newdata = train)
+yhat_modB_train <- predict(modB_train, newdata = train)
+yhat_modC_train <- predict(modC_train, newdata = train)
+
+
+# Calculate RMSE for testing data
+modA_test_RMSE <- sqrt(sum((y_test - yhat_modA_test)^2) / nrow(test))
+modB_test_RMSE <- sqrt(sum((y_test - yhat_modB_test)^2) / nrow(test))
+modC_test_RMSE <- sqrt(sum((y_test - yhat_modC_test)^2) / nrow(test))
+
+# Calculate RMSE for training data
+modA_train_RMSE <- sqrt(sum((y_train - yhat_modA_train)^2) / nrow(train))
+modB_train_RMSE <- sqrt(sum((y_train - yhat_modB_train)^2) / nrow(train))
+modC_train_RMSE <- sqrt(sum((y_train - yhat_modC_train)^2) / nrow(train))
+
+mytable <- tibble(Model = c("A","B","C"),
+       RMSE_testdata = c(modA_test_RMSE, modB_test_RMSE, modC_test_RMSE),
+       RMSE_traindata = c(modA_train_RMSE, modB_train_RMSE, modC_train_RMSE),
+       ratio_of_RMSEs = RMSE_testdata / RMSE_traindata)
+
+library(knitr)
+knitr::kable(mytable)
+```
+
+## What seems to be the model when `set.seed(130)`? Why?
+## What's different about `set.seed(17)`? 
+
